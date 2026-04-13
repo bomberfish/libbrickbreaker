@@ -1,0 +1,15 @@
+#pragma once
+
+#include "ball.hpp"
+#include "board.hpp"
+#include "bricks.hpp"
+#include "bullet.hpp"
+#include "game.hpp"
+#include "paddle.hpp"
+#include "parity.hpp"
+#include "pill.hpp"
+#include "pills.hpp"
+#include "sound.hpp"
+#include "sounds.hpp"
+#include "sprites.hpp"
+#include "types.hpp"

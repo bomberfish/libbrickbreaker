@@ -15,10 +15,24 @@ option(BRICKBREAKER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 
 add_library(libbrickbreaker
   src/libbrickbreaker.cpp
+  src/sprites.cpp
+  src/sound.cpp
+  src/sounds.cpp
+  src/bullet.cpp
+  src/paddle.cpp
+  src/pill.cpp
+  src/pills.cpp
+  src/bricks.cpp
+  src/ball.cpp
+  src/board.cpp
+  src/game.cpp
+  src/parity.cpp
 )
 
+set_target_properties(libbrickbreaker PROPERTIES PREFIX "")
+
 target_include_directories(libbrickbreaker
-  PRIVATE
+  PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )
 
@@ -35,3 +49,8 @@ else()
 endif()
 
 install(TARGETS libbrickbreaker)
+
+install(
+  DIRECTORY ${PROJECT_SOURCE_DIR}/include/
+  DESTINATION include
+)
