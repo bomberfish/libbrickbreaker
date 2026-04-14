@@ -24,6 +24,7 @@ add_library(libbrickbreaker
   src/pills.cpp
   src/bricks.cpp
   src/ball.cpp
+  src/util.cpp
   src/board.cpp
   src/game.cpp
   src/parity.cpp
