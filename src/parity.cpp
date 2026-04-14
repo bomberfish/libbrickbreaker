@@ -100,7 +100,7 @@ ProbeResult testO03RightWallBounce() {
   clearBricks(board);
 
   Ball& ball = board.balls[0];
-  forceBall(ball, board.width - 5, board.height / 2, 3, -1);
+  forceBall(ball, board.width - Ball::RADIUS, board.height / 2, 3, -1);
   const std::int32_t beforeHits = ball.numNonPaddleHits;
   step(board);
 
@@ -137,7 +137,7 @@ ProbeResult testO05BrickHitPath() {
   const std::int32_t tileHeight = board.tileHeight;
   const std::int32_t tileTop = 2 * tileHeight + board.bricks.amountMoved;
   Ball& ball = board.balls[0];
-  forceBall(ball, 2 * tileWidth + (tileWidth / 4), tileTop - 6, 0, 3);
+  forceBall(ball, 2 * tileWidth + (tileWidth / 4), tileTop - 1, 0, 3);
   step(board);
 
   const std::int32_t cell = board.bricks.cells[2][2];

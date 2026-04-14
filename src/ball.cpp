@@ -154,10 +154,13 @@ void Ball::calculateCollisions(std::int32_t boardW,
       dy = -dy;
       y = topBound;
       x = hitPoint.x;
-      board_->increaseBounces(1);
+      const std::int32_t totalBounces = board_->increaseBounces(1);
       ++numNonPaddleHits;
       ++numNonBrickHits;
       Sounds::instance().play(Sounds::SOUND_CEILING);
+      if (totalBounces > 50) {
+        board_->moveDownBricks();
+      }
     }
   }
 
