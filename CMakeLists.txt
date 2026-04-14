@@ -30,6 +30,15 @@ add_library(libbrickbreaker
   src/parity.cpp
 )
 
+add_executable(libbrickbreaker_parity_cli
+  frontends/parity_cli/main.cpp
+)
+
+target_link_libraries(libbrickbreaker_parity_cli
+  PRIVATE
+    libbrickbreaker
+)
+
 set_target_properties(libbrickbreaker PROPERTIES PREFIX "")
 
 target_include_directories(libbrickbreaker
