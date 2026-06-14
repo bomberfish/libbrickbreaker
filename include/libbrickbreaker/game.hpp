@@ -78,6 +78,10 @@ class Game {
   std::int32_t superLevelCount() const;
 
   void run();
+  // Applies pending pointer/trackball input to the paddle (or aims the held ball). This
+  // is normally done inside run(); frontends that drive board.update() directly must call
+  // this once per frame before updating, otherwise touch/drag input never moves the paddle.
+  void applyInput();
   void closeScreen();
 
   bool touchEvent(const PointerEvent& event);

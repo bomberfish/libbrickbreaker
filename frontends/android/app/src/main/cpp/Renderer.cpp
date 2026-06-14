@@ -607,6 +607,7 @@ void Renderer::updateGame() {
         return;
     }
 
+    game_->applyInput();  // apply pending touch drag to the paddle before simulating
     game_->boardRef().update(elapsedMs_);
     game_->advanceState();
 

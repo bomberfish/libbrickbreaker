@@ -1201,6 +1201,7 @@ void gameTick(AppState& state) {
   bool startedHold = false;
   if (!state.game->paused && state.game->gameState() == Game::STATE_PLAYING) {
     applyHeldInput(state);
+    state.game->applyInput();  // apply pending mouse/touch drag to the paddle
     state.game->boardRef().update(e);
 
     const std::int32_t s = state.game->gameState();

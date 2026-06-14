@@ -115,18 +115,17 @@ void Bricks::destroyBrick(std::int32_t x, std::int32_t y) {
     return;
   }
 
+  // Mirrors the original destroyBrick (used by the bomb projectile): play the destroy
+  // sound, roll the bonus, decrement the block count for normal bricks (< 90), and clear
+  // the cell. Note the original has no early-out for indestructible cells here, so a bomb
+  // projectile can clear them (they are simply not counted in numBlocks).
   const std::int32_t value = cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
-  if (value == EMPTY || value == INDESTRUCTIBLE) {
-    return;
-  }
-
+  Sounds::instance().play(Sounds::SOUND_BRICKDESTROY);
   checkForBonus(x, y);
   if (value < 90) {
     numBlocks = std::max<std::int32_t>(0, numBlocks - 1);
-    ++lastDestroyedCount_;
   }
 
-  Sounds::instance().play(Sounds::SOUND_BRICKDESTROY);
   cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = EMPTY;
   bonuses[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = 0;
 }
@@ -137,25 +136,60 @@ void Bricks::hitBrick(std::int32_t x, std::int32_t y, std::int32_t damage) {
   }
 
   const std::int32_t current = cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
-  if (current == EMPTY || current == INDESTRUCTIBLE) {
+  // Skip empty/destroyed (<= 0) and indestructible (>= 90) cells, matching the
+  // original Bricks.hitBrick guards.
+  if (current <= 0 || current >= 90) {
     return;
   }
+
+  // The original awards points on EVERY hit (not only on destruction) and rolls the
+  // bonus drop on the first contact with a bonus brick (CheckForBonus clears it after).
+  if (board_ != nullptr) {
+    board_->increasePoints(10);
+  }
+  checkForBonus(x, y);
 
   if (board_ != nullptr && board_->gotBomb) {
-    for (std::int32_t yy = y - 1; yy <= y + 1; ++yy) {
-      for (std::int32_t xx = x - 1; xx <= x + 1; ++xx) {
-        destroyBrick(xx, yy);
-      }
+    // Explosive ball: destroy this brick, detonate, then deal a single ring of damage
+    // to the neighbours. explode() clears gotBomb, so the recursive calls below take the
+    // normal-damage path (orthogonal = 2, diagonal = 1) instead of chaining forever.
+    cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = 0;
+    Sounds::instance().play(Sounds::SOUND_BOMB);
+    board_->explode();
+    board_->increasePoints(10);
+    if (y > 0) {
+      hitBrick(x, y - 1, 2);
     }
-    return;
+    if (y > 0 && x > 0) {
+      hitBrick(x - 1, y - 1, 1);
+    }
+    if (y > 0 && x < COLUMNS - 1) {
+      hitBrick(x + 1, y - 1, 1);
+    }
+    if (y < ROWS - 1) {
+      hitBrick(x, y + 1, 2);
+    }
+    if (y < ROWS - 1 && x > 0) {
+      hitBrick(x - 1, y + 1, 1);
+    }
+    if (y < ROWS - 1 && x < COLUMNS - 1) {
+      hitBrick(x + 1, y + 1, 1);
+    }
+    if (x > 0) {
+      hitBrick(x - 1, y, 2);
+    }
+    if (x < COLUMNS - 1) {
+      hitBrick(x + 1, y, 2);
+    }
+  } else {
+    const std::int32_t next = current - damage;
+    cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = next;
+    Sounds::instance().play(next <= 0 ? Sounds::SOUND_BRICKDESTROY : Sounds::SOUND_BRICKHIT);
   }
 
-  const std::int32_t next = current - std::max<std::int32_t>(1, damage);
-  if (next <= 0) {
-    destroyBrick(x, y);
-  } else {
-    cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = next;
-    Sounds::instance().play(Sounds::SOUND_BRICKHIT);
+  if (cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] <= 0) {
+    numBlocks = std::max<std::int32_t>(0, numBlocks - 1);
+    cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = EMPTY;
   }
 }
 
@@ -196,8 +230,11 @@ void Bricks::checkForBonus(std::int32_t x, std::int32_t y) {
     return;
   }
 
+  // Matches the original CheckForBonus guard: only drop for a positive bonus on a
+  // non-indestructible cell (Field < 90).
   const std::int32_t bonus = bonuses[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
-  if (bonus <= 0) {
+  const std::int32_t value = cells[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+  if (bonus <= 0 || value >= 90) {
     return;
   }
 
@@ -221,7 +258,11 @@ void Bricks::render(Graphics* graphics) const {
 void Bricks::moveDown() {
   const std::int32_t tileHeight = board_ != nullptr ? board_->tileHeight : std::max<std::int32_t>(1, ROWS + 5);
   const std::int32_t cap = 3 * tileHeight;
-  amountMoved = std::min<std::int32_t>(cap, amountMoved + 5);
+  // Original advances by 5 while at-or-below the cap, so the final value may overshoot the
+  // cap by up to 4 (it does not clamp exactly to the cap).
+  if (amountMoved <= cap) {
+    amountMoved += 5;
+  }
 }
 
 std::int32_t Bricks::movedAmount() const {
@@ -231,7 +272,6 @@ std::int32_t Bricks::movedAmount() const {
 void Bricks::initialize(std::int32_t level) {
   amountMoved = 0;
   numBlocks = 0;
-  lastDestroyedCount_ = 0;
 
   for (auto& row : cells) {
     row.fill(EMPTY);
@@ -266,12 +306,6 @@ void Bricks::initialize(std::int32_t level) {
           bonusNibble == 0 ? 0 : randomSpecialPill();
     }
   }
-}
-
-std::int32_t Bricks::consumeDestroyedCount() {
-  const std::int32_t destroyed = lastDestroyedCount_;
-  lastDestroyedCount_ = 0;
-  return destroyed;
 }
 
 }  // namespace libbrickbreaker

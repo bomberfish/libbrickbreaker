@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "libbrickbreaker/game.hpp"
 #include "libbrickbreaker/sounds.hpp"
@@ -276,9 +277,9 @@ void Board::renderProjectiles(Graphics* graphics) {
     laser.render(graphics);
   }
 
-  processProjectileCollision(bomb, 3, true);
+  processProjectileCollision(bomb, true);
   for (Bullet& laser : lasers) {
-    processProjectileCollision(laser, 1, false);
+    processProjectileCollision(laser, false);
   }
 }
 
@@ -288,10 +289,10 @@ void Board::powerUp(std::int32_t id) {
 
   switch (id) {
     case Pill::LNG:
+      // Note: the original LONG case does NOT clear gotBomb (unlike GUN/CATCH/LASER/BOMB).
       if (game != nullptr) {
         game->setAmmo(0);
       }
-      gotBomb = false;
       gotLaser = false;
       paddle.sticky = false;
       paddle.flipped = false;
@@ -382,68 +383,62 @@ void Board::increasePoints(std::int32_t points) {
   }
 }
 
-void Board::applyBrickScore() {
-  const std::int32_t destroyed = bricks.consumeDestroyedCount();
-  if (destroyed > 0) {
-    increasePoints(destroyed * 10);
-  }
-}
-
 void Board::addBalls() {
+  // Mirrors the original addBalls: pick the first ACTIVE ball as the position source
+  // (by isActive, not an x sentinel), copy its position into all four balls, assign the
+  // fixed launch vectors, and activate every ball.
+  numActiveBalls = MAX_BALLS;
+
   Ball* source = nullptr;
   for (Ball& ball : balls) {
-    if (ball.x != 0) {
+    if (ball.isActive()) {
       source = &ball;
       break;
     }
   }
-  if (source == nullptr) {
-    source = &balls[0];
+
+  if (source != nullptr) {
+    const std::int32_t srcX = source->x;
+    const std::int32_t srcY = source->y;
+    for (Ball& ball : balls) {
+      ball.x = srcX;
+      ball.oldx = srcX;
+      ball.y = srcY;
+      ball.oldy = srcY;
+    }
   }
 
   static constexpr std::int32_t kVectors[MAX_BALLS] = {-3, -1, 1, 3};
   for (std::int32_t i = 0; i < MAX_BALLS; ++i) {
     Ball& ball = balls[static_cast<std::size_t>(i)];
-    ball.x = source->x;
-    ball.y = source->y;
-    ball.oldx = source->x;
-    ball.oldy = source->y;
-    ball.dx = kVectors[static_cast<std::size_t>(i)];
-    ball.dy = -3;
-    if (!ball.isActive()) {
-      ball.activate();
-    }
+    ball.setSpeed(kVectors[static_cast<std::size_t>(i)], -3);
+    ball.activate();
   }
-
-  numActiveBalls = MAX_BALLS;
 }
 
 void Board::killBallsExceptOne() {
-  std::int32_t primaryIndex = 0;
-  std::int32_t bestY = std::numeric_limits<std::int32_t>::max();
-
+  // Mirrors the original killBallsExceptOne: keep the active ball with the smallest y
+  // (highest on screen), swap it into slot 0, deactivate the rest, and normalise the
+  // active count to 1.
+  std::int32_t keep = -1;
   for (std::int32_t i = 0; i < MAX_BALLS; ++i) {
     const Ball& ball = balls[static_cast<std::size_t>(i)];
-    if (ball.isActive() && ball.y < bestY) {
-      bestY = ball.y;
-      primaryIndex = i;
-    }
-  }
-
-  for (std::int32_t i = 0; i < MAX_BALLS; ++i) {
-    if (i == primaryIndex) {
+    if (!ball.isActive()) {
       continue;
     }
-    Ball& ball = balls[static_cast<std::size_t>(i)];
-    ball.deactivate();
-    ball.x = 0;
+    if (keep == -1 || ball.y < balls[static_cast<std::size_t>(keep)].y) {
+      keep = i;
+    }
   }
 
-  Ball& primary = balls[static_cast<std::size_t>(primaryIndex)];
-  if (!primary.isActive()) {
-    primary.activate();
+  if (keep != -1 && keep != 0) {
+    std::swap(balls[0], balls[static_cast<std::size_t>(keep)]);
   }
-  primary.x = 1;
+
+  for (std::int32_t i = 1; i < MAX_BALLS; ++i) {
+    balls[static_cast<std::size_t>(i)].deactivate();
+  }
+  balls[0].activate();
   numActiveBalls = 1;
 }
 
@@ -476,14 +471,17 @@ void Board::shoot() {
     return;
   }
 
+  const Rect ext = paddle.extent();
+
+  // Bomb (gun ammo): fire from the paddle centre, slightly above it, only when ammo is
+  // available and the single bomb slot is free. The original plays no fire sound here.
   if (game->ammoCount() > 0 && !bomb.isActive()) {
-    bomb.activate(paddle.centerX(), paddle.y, 10);
+    bomb.activate(ext.x + (ext.width / 2) - (bomb.width / 2), ext.y - 7, 10);
     bomb.setScaleFactorY(factorY);
     game->decreaseAmmo();
     if (game->ammoCount() == 0) {
       paddle.setMode(Paddle::MODE_DEFAULT);
     }
-    Sounds::instance().play(Sounds::SOUND_BOMB);
     return;
   }
 
@@ -491,31 +489,43 @@ void Board::shoot() {
     return;
   }
 
-  const std::int32_t spawnY = paddle.y;
-  const std::int32_t leftX = paddle.x + 2;
-  const std::int32_t rightX = paddle.x + paddle.width - 4;
-
-  for (Bullet& laser : lasers) {
-    if (!laser.isActive()) {
-      laser.activate(leftX, spawnY, 15);
-      laser.setScaleFactorY(factorY);
-      Sounds::instance().play(Sounds::SOUND_LASER);
-      break;
-    }
+  // Lasers: left bullet from slots {0,1}, right bullet from slots {2,3}, fired from the
+  // paddle's quarter and three-quarter points. A single laser sound plays if any fired.
+  std::int32_t leftIndex = -1;
+  std::int32_t rightIndex = -1;
+  if (!lasers[0].isActive()) {
+    leftIndex = 0;
+  } else if (!lasers[1].isActive()) {
+    leftIndex = 1;
+  }
+  if (!lasers[2].isActive()) {
+    rightIndex = 2;
+  } else if (!lasers[3].isActive()) {
+    rightIndex = 3;
   }
 
-  for (Bullet& laser : lasers) {
-    if (!laser.isActive()) {
-      laser.activate(rightX, spawnY, 15);
-      laser.setScaleFactorY(factorY);
-      Sounds::instance().play(Sounds::SOUND_LASER);
-      break;
-    }
+  const std::int32_t quarter = paddle.width >> 2;
+  if (leftIndex >= 0) {
+    Bullet& laser = lasers[static_cast<std::size_t>(leftIndex)];
+    laser.activate(ext.x + quarter, ext.y, 15);
+    laser.setScaleFactorY(factorY);
+  }
+  if (rightIndex >= 0) {
+    Bullet& laser = lasers[static_cast<std::size_t>(rightIndex)];
+    laser.activate(ext.x + (3 * quarter), ext.y, 15);
+    laser.setScaleFactorY(factorY);
+  }
+  if (leftIndex >= 0 || rightIndex >= 0) {
+    Sounds::instance().play(Sounds::SOUND_LASER);
   }
 }
 
 void Board::explode() {
+  // Matches the original explode(): trigger the flash, clear any flash message, and
+  // crucially reset gotBomb so the explosive ball is consumed after a single detonation.
   flashCount = 4;
+  flashingString = "";
+  gotBomb = false;
 }
 
 const char* Board::statusText() const {
@@ -525,7 +535,7 @@ const char* Board::statusText() const {
   return "";
 }
 
-void Board::processProjectileCollision(Bullet& projectile, std::int32_t damage, bool isBomb) {
+void Board::processProjectileCollision(Bullet& projectile, bool isBomb) {
   if (!projectile.isActive()) {
     return;
   }
@@ -541,14 +551,16 @@ void Board::processProjectileCollision(Bullet& projectile, std::int32_t damage, 
     return;
   }
 
-  bricks.hitBrick(col, row, damage);
-  applyBrickScore();
-  projectile.deactivate();
-
   if (isBomb) {
-    increasePoints(10);
-    explode();
+    // Bomb projectile instantly destroys one brick and awards 50 points (Board side);
+    // it does not go through the explosive-ball hitBrick path.
+    bricks.destroyBrick(col, row);
+    increasePoints(50);
+  } else {
+    // Laser deals one point of damage; the per-hit 10 points are awarded inside hitBrick.
+    bricks.hitBrick(col, row, 1);
   }
+  projectile.deactivate();
 }
 
 const char* Board::getPowerUpMessage(std::int32_t id) const {

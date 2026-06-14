@@ -416,6 +416,7 @@ int main(int argc, char** argv) {
     lastFrame = now;
 
     if (!quit && !game.paused) {
+      game.applyInput();
       game.boardRef().update(boundedElapsed);
       const std::int32_t prevState = game.gameState();
       game.advanceState();

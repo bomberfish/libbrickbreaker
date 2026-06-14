@@ -301,9 +301,6 @@ void Game::run() {
   const std::int32_t elapsedMs = static_cast<std::int32_t>(std::max<std::int64_t>(0, frameStart - lastTimeMs));
   lastTimeMs = frameStart;
 
-  Paddle* paddle = board_.paddleRef();
-  Ball& primary = board_.balls[0];
-
   if (state != STATE_PLAYING) {
     running = false;
     cancelScheduledFrame();
@@ -319,23 +316,7 @@ void Game::run() {
     return;
   }
 
-  if (paddle != nullptr && paddle->currentInputMode() == Paddle::INPUT_TOUCH) {
-    if (primary.stopped()) {
-      const std::int32_t delta = trackingTouchPoint_ - moveTo_;
-      const std::int32_t threshold = board_.width >> 5;
-      if (std::abs(delta) > threshold) {
-        primary.direction(delta > 0 ? -1 : 1);
-        trackingTouchPoint_ = moveTo_;
-      }
-    } else {
-      paddle->moveTo(moveTo_, board_);
-    }
-  }
-
-  if (trackBallDelta != 0 && paddle != nullptr) {
-    paddle->move(trackBallDelta, board_);
-    trackBallDelta = 0;
-  }
+  applyInput();
 
   board_.update(elapsedMs);
   advanceState();
@@ -349,6 +330,36 @@ void Game::run() {
   const std::int32_t delayMs = std::max<std::int32_t>(0, idleTimeMs_);
   idleTimeMs_ = 0;
   scheduleNextFrame(delayMs);
+}
+
+void Game::applyInput() {
+  if (state != STATE_PLAYING || paused) {
+    return;
+  }
+
+  Paddle* paddle = board_.paddleRef();
+  if (paddle == nullptr) {
+    return;
+  }
+  Ball& primary = board_.balls[0];
+
+  if (paddle->currentInputMode() == Paddle::INPUT_TOUCH) {
+    if (primary.stopped()) {
+      const std::int32_t delta = trackingTouchPoint_ - moveTo_;
+      const std::int32_t threshold = board_.width >> 5;
+      if (std::abs(delta) > threshold) {
+        primary.direction(delta > 0 ? -1 : 1);
+        trackingTouchPoint_ = moveTo_;
+      }
+    } else {
+      paddle->moveTo(moveTo_, board_);
+    }
+  }
+
+  if (trackBallDelta != 0) {
+    paddle->move(trackBallDelta, board_);
+    trackBallDelta = 0;
+  }
 }
 
 void Game::closeScreen() {

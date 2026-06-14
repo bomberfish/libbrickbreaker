@@ -70,7 +70,6 @@ class Board {
 
   void powerUp(std::int32_t id);
   void increasePoints(std::int32_t points);
-  void applyBrickScore();
 
   void addBalls();
   void killBallsExceptOne();
@@ -118,7 +117,7 @@ class Board {
   [[maybe_unused]] std::uint32_t randomSeed_{0x6d2b79f5u};
   [[maybe_unused]] bool lifeDecrementPending_{false};
 
-  void processProjectileCollision(Bullet& projectile, std::int32_t damage, bool isBomb);
+  void processProjectileCollision(Bullet& projectile, bool isBomb);
   const char* getPowerUpMessage(std::int32_t id) const;
   void syncMetrics();
 };

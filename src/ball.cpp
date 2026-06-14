@@ -304,7 +304,8 @@ void Ball::hit(std::int32_t xIn, std::int32_t yIn) {
   ++numNonPaddleHits;
   numNonBrickHits = 0;
   board_->bricks.hitBrick(xIn, yIn, 2);
-  board_->applyBrickScore();
+  // Scoring happens per-hit inside Bricks::hitBrick (matching the original); no extra
+  // per-destroy scoring here.
 }
 
 bool Ball::checkBrickCollisions() {

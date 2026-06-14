@@ -34,7 +34,6 @@ class Bricks {
   void moveDown();
   std::int32_t movedAmount() const;
   void initialize(std::int32_t level);
-  std::int32_t consumeDestroyedCount();
 
   std::int32_t numBlocks{0};
   std::int32_t amountMoved{0};
@@ -43,7 +42,6 @@ class Bricks {
 
  private:
   Board* board_{nullptr};
-  [[maybe_unused]] std::int32_t lastDestroyedCount_{0};
 };
 
 }  // namespace libbrickbreaker

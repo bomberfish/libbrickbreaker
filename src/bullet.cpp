@@ -38,8 +38,10 @@ void Bullet::move(std::int32_t scaledElapsed) {
   }
 
   const std::int32_t elapsed = std::max<std::int32_t>(0, scaledElapsed);
-  const std::int32_t velocity = static_cast<std::int32_t>((static_cast<std::int64_t>(factorY_) * dy) >> 16);
-  const std::int32_t step = static_cast<std::int32_t>((static_cast<std::int64_t>(elapsed) * velocity) >> 16);
+  // Original Bullet.move order: ((elapsed * dy) >> 16) first, then * factorY, then >> 16.
+  // (This differs from Pill.move, which scales by factorY before multiplying by elapsed.)
+  const std::int32_t inner = static_cast<std::int32_t>((static_cast<std::int64_t>(elapsed) * dy) >> 16);
+  const std::int32_t step = static_cast<std::int32_t>((static_cast<std::int64_t>(factorY_) * inner) >> 16);
   y -= step;
   if (y < 0) {
     deactivate();

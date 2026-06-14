@@ -381,10 +381,162 @@ ProbeResult testO17AimingSkipsZeroAndClamps() {
   return makeFail("O17", "aim direction clamp/skip behavior mismatch");
 }
 
+ProbeResult testO18ScorePerHitNotPerDestroy() {
+  Game game = createSilentGame();
+  game.newGame(1);
+  Board& board = game.boardRef();
+  clearBricks(board);
+
+  board.bricks.cells[2][2] = 8;  // needs four damage-2 hits to destroy
+  board.bricks.numBlocks = 1;
+
+  const std::int32_t before = game.score;
+  board.bricks.hitBrick(2, 2, 2);  // hit 1: durability 8 -> 6 (not destroyed)
+  const std::int32_t afterHit1 = game.score;
+  board.bricks.hitBrick(2, 2, 2);  // hit 2: 6 -> 4
+  board.bricks.hitBrick(2, 2, 2);  // hit 3: 4 -> 2
+  board.bricks.hitBrick(2, 2, 2);  // hit 4: 2 -> destroyed
+  const std::int32_t afterDestroy = game.score;
+
+  // Original awards 10 points on every hit, even non-destroying ones.
+  if (afterHit1 == before + 10 && afterDestroy == before + 40) {
+    return makePass("O18", "score increases 10 per hit, not only on destroy");
+  }
+
+  std::ostringstream ss;
+  ss << "expected +10 then +40, got +" << (afterHit1 - before) << " then +" << (afterDestroy - before);
+  return makeFail("O18", ss.str());
+}
+
+ProbeResult testO19BombProjectileInstantDestroy() {
+  Game game = createSilentGame();
+  game.newGame(1);
+  Board& board = game.boardRef();
+  clearBricks(board);
+
+  board.bricks.cells[3][3] = 8;  // high durability; bomb projectile must clear it outright
+  board.bricks.numBlocks = 1;
+  board.gotBomb = false;  // ensure the explosive-ball path is not involved
+
+  const std::int32_t before = game.score;
+  board.bomb.activate(3 * board.tileWidth + (board.tileWidth / 2),
+                      3 * board.tileHeight + board.bricks.amountMoved + 1,
+                      10);
+  board.renderProjectiles(nullptr);  // processes the bomb-vs-brick collision
+
+  const std::int32_t cell = board.bricks.cells[3][3];
+  if (cell == Bricks::EMPTY && game.score == before + 50 && !board.bomb.isActive() &&
+      board.bricks.numBlocks == 0) {
+    return makePass("O19", "bomb projectile instantly destroys brick and awards 50");
+  }
+  return makeFail("O19", "bomb projectile destroy/score mismatch");
+}
+
+ProbeResult testO20ExplosiveBallChain() {
+  Game game = createSilentGame();
+  game.newGame(1);
+  Board& board = game.boardRef();
+  clearBricks(board);
+
+  board.bricks.cells[3][3] = 4;  // center
+  board.bricks.cells[2][3] = 8;  // up    (orthogonal, damage 2)
+  board.bricks.cells[4][3] = 8;  // down  (orthogonal, damage 2)
+  board.bricks.cells[3][2] = 8;  // left  (orthogonal, damage 2)
+  board.bricks.cells[3][4] = 8;  // right (orthogonal, damage 2)
+  board.bricks.cells[2][2] = 8;  // up-left (diagonal, damage 1)
+  board.bricks.numBlocks = 6;
+  board.gotBomb = true;
+
+  board.bricks.hitBrick(3, 3, 2);  // explosive contact at the centre
+
+  const bool centerGone = board.bricks.cells[3][3] == Bricks::EMPTY;
+  const bool orthoDamaged = board.bricks.cells[2][3] == 6 && board.bricks.cells[4][3] == 6 &&
+                            board.bricks.cells[3][2] == 6 && board.bricks.cells[3][4] == 6;
+  const bool diagDamaged = board.bricks.cells[2][2] == 7;
+  const bool bombConsumed = !board.gotBomb;
+
+  if (centerGone && orthoDamaged && diagDamaged && bombConsumed) {
+    return makePass("O20", "explosive ball destroys center, damages neighbors 2/1, resets gotBomb");
+  }
+  return makeFail("O20", "explosive ball neighbor-chain/gotBomb-reset mismatch");
+}
+
+ProbeResult testO21KillBallsKeepsHighestInSlotZero() {
+  Game game = createSilentGame();
+  game.newGame(1);
+  Board& board = game.boardRef();
+
+  for (std::int32_t i = 0; i < Board::MAX_BALLS; ++i) {
+    Ball& ball = board.balls[static_cast<std::size_t>(i)];
+    ball.activate();
+    ball.x = 10 + i;
+    ball.y = (i == 2) ? 50 : (100 - i);  // ball index 2 is highest on screen (smallest y)
+    ball.setSpeed(1, 1);
+  }
+  board.numActiveBalls = Board::MAX_BALLS;
+  const std::int32_t survivorX = board.balls[2].x;
+
+  board.killBallsExceptOne();
+
+  std::int32_t activeCount = 0;
+  for (const Ball& ball : board.balls) {
+    if (ball.isActive()) {
+      ++activeCount;
+    }
+  }
+
+  if (activeCount == 1 && board.balls[0].isActive() && board.balls[0].x == survivorX &&
+      board.numActiveBalls == 1) {
+    return makePass("O21", "killBallsExceptOne swaps highest ball into active slot 0");
+  }
+  return makeFail("O21", "killBallsExceptOne survivor/slot-0 mismatch");
+}
+
+ProbeResult testO22TouchDragMovesPaddle() {
+  // Regression guard: frontends drive board.update() directly, so Game::applyInput() must
+  // translate a pointer drag into paddle movement (otherwise the paddle is frozen and the
+  // ball appears to always bounce the same way regardless of contact point).
+  Game game = createSilentGame();
+  game.newGame(1);
+  Board& board = game.boardRef();
+
+  board.balls[0].setSpeed(1, -3);  // ball in motion -> drag moves paddle (does not aim)
+  const std::int32_t startX = board.paddle.x;
+  const std::int32_t center = board.paddle.centerX();
+  const std::int32_t drag = board.width / 4;
+
+  PointerEvent start{};
+  start.type = PointerType::kStart;
+  start.x = center;
+  start.y = board.paddle.y;
+  game.touchEvent(start);
+
+  PointerEvent right{};
+  right.type = PointerType::kMove;
+  right.x = center + drag;
+  right.y = board.paddle.y;
+  game.touchEvent(right);
+  game.applyInput();
+  const bool movedRight = board.paddle.x > startX;
+
+  PointerEvent left{};
+  left.type = PointerType::kMove;
+  left.x = center - drag;
+  left.y = board.paddle.y;
+  game.touchEvent(left);
+  game.applyInput();
+  const bool movedLeft = board.paddle.x < startX;
+
+  if (movedRight && movedLeft) {
+    return makePass("O22", "pointer drag moves the paddle through applyInput");
+  }
+  return makeFail("O22", "pointer drag did not move the paddle");
+}
+
 }  // namespace
 
 ParityReport runParityProbes() {
-  std::array<ProbeResult, 17> probes = {
+  std::array<ProbeResult, 22> probes = {
       testO01StickyCountIncrements(),
       testO02StickyReleaseAfterThreshold(),
       testO03RightWallBounce(),
@@ -402,6 +554,11 @@ ParityReport runParityProbes() {
       testO15GameOverReturnsNone(),
       testO16DurabilityNeedsMultipleHits(),
       testO17AimingSkipsZeroAndClamps(),
+      testO18ScorePerHitNotPerDestroy(),
+      testO19BombProjectileInstantDestroy(),
+      testO20ExplosiveBallChain(),
+      testO21KillBallsKeepsHighestInSlotZero(),
+      testO22TouchDragMovesPaddle(),
   };
 
   ParityReport report;
