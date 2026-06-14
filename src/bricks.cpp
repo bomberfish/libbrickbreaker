@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdlib>
 #include <optional>
 #include <vector>
 
@@ -18,6 +17,12 @@ constexpr std::int32_t kLevelHeaderSize = 1;
 constexpr std::int32_t kLevelBytes = Bricks::ROWS * Bricks::COLUMNS;
 
 std::vector<std::uint8_t> g_levelData;
+
+std::int32_t fallbackRandomPercent() {
+  static std::uint32_t seed = 0x4f1bbcddu;
+  seed = 1103515245u * seed + 12345u;
+  return static_cast<std::int32_t>((seed >> 16) % 100u);
+}
 
 std::int32_t mapDurability(std::int32_t brickNibble) {
   const std::int32_t nibble = std::max<std::int32_t>(1, std::min<std::int32_t>(14, brickNibble));
@@ -155,7 +160,7 @@ void Bricks::hitBrick(std::int32_t x, std::int32_t y, std::int32_t damage) {
 }
 
 std::int16_t Bricks::randomSpecialPill() const {
-  const std::int32_t roll = board_ != nullptr ? board_->rand(100) : (std::rand() % 100);
+  const std::int32_t roll = board_ != nullptr ? board_->rand(100) : fallbackRandomPercent();
   if (roll < 10) {
     return 1;
   }

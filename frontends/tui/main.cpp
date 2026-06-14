@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -19,6 +20,51 @@ constexpr std::int32_t kCanvasWidth = 56;
 constexpr std::int32_t kCanvasHeight = 28;
 constexpr std::int32_t kFrameMs = 33;
 
+// ncurses color pair ids
+constexpr short kPairFrame = 1;
+constexpr short kPairHud = 2;
+constexpr short kPairOverlay = 3;
+constexpr short kPairBrickBlue = 4;
+constexpr short kPairBrickGreen = 5;
+constexpr short kPairBrickYellow = 6;
+constexpr short kPairBrickOrange = 7;
+constexpr short kPairBrickGray = 8;
+constexpr short kPairBall = 9;
+constexpr short kPairPaddle = 10;
+constexpr short kPairPill = 11;
+constexpr short kPairLaser = 12;
+constexpr short kPairBomb = 13;
+
+bool g_useColor = false;
+
+void setupColors() {
+  if (!has_colors()) {
+    return;
+  }
+  start_color();
+  use_default_colors();
+  init_pair(kPairFrame, COLOR_WHITE, -1);
+  init_pair(kPairHud, COLOR_CYAN, -1);
+  init_pair(kPairOverlay, COLOR_BLACK, COLOR_YELLOW);
+  init_pair(kPairBrickBlue, COLOR_BLUE, -1);
+  init_pair(kPairBrickGreen, COLOR_GREEN, -1);
+  init_pair(kPairBrickYellow, COLOR_YELLOW, -1);
+  init_pair(kPairBrickOrange, COLOR_RED, -1);
+  init_pair(kPairBrickGray, COLOR_WHITE, -1);
+  init_pair(kPairBall, COLOR_WHITE, -1);
+  init_pair(kPairPaddle, COLOR_GREEN, -1);
+  init_pair(kPairPill, COLOR_MAGENTA, -1);
+  init_pair(kPairLaser, COLOR_RED, -1);
+  init_pair(kPairBomb, COLOR_RED, -1);
+  g_useColor = true;
+}
+
+struct Cell {
+  char glyph{' '};
+  short pair{0};
+  bool bold{false};
+};
+
 std::int32_t mapX(std::int32_t x, std::int32_t boardWidth) {
   return (x * (kCanvasWidth - 1)) / std::max<std::int32_t>(1, boardWidth);
 }
@@ -27,12 +73,14 @@ std::int32_t mapY(std::int32_t y, std::int32_t boardHeight) {
   return (y * (kCanvasHeight - 1)) / std::max<std::int32_t>(1, boardHeight);
 }
 
-void drawRect(std::vector<std::string>& canvas,
+void drawCell(std::vector<std::vector<Cell>>& canvas,
               std::int32_t x,
               std::int32_t y,
               std::int32_t w,
               std::int32_t h,
-              char symbol) {
+              char glyph,
+              short pair,
+              bool bold) {
   for (std::int32_t yy = y; yy < y + h; ++yy) {
     if (yy < 0 || yy >= static_cast<std::int32_t>(canvas.size())) {
       continue;
@@ -41,35 +89,85 @@ void drawRect(std::vector<std::string>& canvas,
       if (xx < 0 || xx >= static_cast<std::int32_t>(canvas[yy].size())) {
         continue;
       }
-      canvas[yy][xx] = symbol;
+      canvas[yy][xx] = Cell{glyph, pair, bold};
     }
   }
 }
 
-char brickSymbol(std::int32_t value) {
+struct BrickStyle {
+  char glyph;
+  short pair;
+  bool bold;
+};
+
+BrickStyle brickStyle(std::int32_t value) {
   if (value == Bricks::EMPTY || value <= 0) {
-    return ' ';
+    return {' ', 0, false};
   }
   if (value >= Bricks::INDESTRUCTIBLE) {
-    return '#';
+    return {'#', kPairBrickGray, true};
   }
   if (value >= 7) {
-    return '@';
+    return {'@', kPairBrickOrange, true};
   }
   if (value >= 5) {
-    return '%';
+    return {'%', kPairBrickYellow, true};
   }
   if (value >= 3) {
-    return 'x';
+    return {'x', kPairBrickGreen, false};
   }
-  return '+';
+  return {'+', kPairBrickBlue, false};
 }
 
-void renderFrame(const Game& game, std::int32_t fpsEstimate) {
+void putCharStyled(std::int32_t y, std::int32_t x, char ch, short pair, bool bold) {
+  attr_t attr = A_NORMAL;
+  if (bold) {
+    attr |= A_BOLD;
+  }
+  if (g_useColor && pair != 0) {
+    attron(COLOR_PAIR(pair) | attr);
+    mvaddch(y, x, static_cast<chtype>(ch));
+    attroff(COLOR_PAIR(pair) | attr);
+  } else {
+    if (bold) {
+      attron(A_BOLD);
+    }
+    mvaddch(y, x, static_cast<chtype>(ch));
+    if (bold) {
+      attroff(A_BOLD);
+    }
+  }
+}
+
+void putStringStyled(std::int32_t y, std::int32_t x, const std::string& text, short pair, bool bold) {
+  attr_t attr = A_NORMAL;
+  if (bold) {
+    attr |= A_BOLD;
+  }
+  if (g_useColor && pair != 0) {
+    attron(COLOR_PAIR(pair) | attr);
+    mvprintw(y, x, "%s", text.c_str());
+    attroff(COLOR_PAIR(pair) | attr);
+  } else {
+    if (bold) {
+      attron(A_BOLD);
+    }
+    mvprintw(y, x, "%s", text.c_str());
+    if (bold) {
+      attroff(A_BOLD);
+    }
+  }
+}
+
+void renderFrame(const Game& game,
+                 std::int32_t fpsEstimate,
+                 std::int32_t levelDisplay,
+                 std::int32_t superLevel,
+                 const std::string& statusLine) {
   const Board& board = game.boardRef();
-  std::vector<std::string> canvas(
+  std::vector<std::vector<Cell>> canvas(
       static_cast<std::size_t>(kCanvasHeight),
-      std::string(static_cast<std::size_t>(kCanvasWidth), ' '));
+      std::vector<Cell>(static_cast<std::size_t>(kCanvasWidth), Cell{}));
 
   for (std::int32_t row = 0; row < Bricks::ROWS; ++row) {
     for (std::int32_t col = 0; col < Bricks::COLUMNS; ++col) {
@@ -86,7 +184,8 @@ void renderFrame(const Game& game, std::int32_t fpsEstimate) {
       const std::int32_t h = std::max<std::int32_t>(
           1,
           board.tileHeight * kCanvasHeight / std::max<std::int32_t>(1, board.height));
-      drawRect(canvas, x, y, w, h, brickSymbol(cell));
+      const BrickStyle style = brickStyle(cell);
+      drawCell(canvas, x, y, w, h, style.glyph, style.pair, style.bold);
     }
   }
 
@@ -94,25 +193,25 @@ void renderFrame(const Game& game, std::int32_t fpsEstimate) {
     if (!pill.isActive()) {
       continue;
     }
-    drawRect(canvas, mapX(pill.x, board.width), mapY(pill.y, board.height), 1, 1, 'P');
+    drawCell(canvas, mapX(pill.x, board.width), mapY(pill.y, board.height), 1, 1, 'P', kPairPill, true);
   }
 
   for (const Bullet& laser : board.lasers) {
     if (!laser.isActive()) {
       continue;
     }
-    drawRect(canvas, mapX(laser.x, board.width), mapY(laser.y, board.height), 1, 1, '|');
+    drawCell(canvas, mapX(laser.x, board.width), mapY(laser.y, board.height), 1, 1, '|', kPairLaser, true);
   }
 
   if (board.bomb.isActive()) {
-    drawRect(canvas, mapX(board.bomb.x, board.width), mapY(board.bomb.y, board.height), 1, 1, 'B');
+    drawCell(canvas, mapX(board.bomb.x, board.width), mapY(board.bomb.y, board.height), 1, 1, 'B', kPairBomb, true);
   }
 
   for (const Ball& ball : board.balls) {
     if (!ball.isActive()) {
       continue;
     }
-    drawRect(canvas, mapX(ball.x, board.width), mapY(ball.y, board.height), 1, 1, 'o');
+    drawCell(canvas, mapX(ball.x, board.width), mapY(ball.y, board.height), 1, 1, 'o', kPairBall, true);
   }
 
   const std::int32_t paddleX = mapX(board.paddle.x, board.width);
@@ -120,39 +219,53 @@ void renderFrame(const Game& game, std::int32_t fpsEstimate) {
   const std::int32_t paddleW = std::max<std::int32_t>(
       2,
       board.paddle.width * kCanvasWidth / std::max<std::int32_t>(1, board.width));
-  drawRect(canvas, paddleX, paddleY, paddleW, 1, '=');
+  drawCell(canvas, paddleX, paddleY, paddleW, 1, '=', kPairPaddle, true);
 
   erase();
-  mvprintw(0,
-           0,
-           "BrickBreaker TUI | score=%d lives=%d ammo=%d state=%d fps~%d",
-           game.score,
-           game.lives,
-           game.ammoCount(),
-           game.gameState(),
-           fpsEstimate);
-  mvprintw(1, 0, "Controls: A/D or arrows move, Space shoot, P pause, Q quit");
 
-  mvaddch(2, 0, '+');
-  for (std::int32_t x = 0; x < kCanvasWidth; ++x) {
-    mvaddch(2, x + 1, '-');
+  const std::string title = "BrickBreaker  TUI";
+  putStringStyled(0, 0, title, kPairHud, true);
+
+  char buffer[256];
+  if (superLevel > 0) {
+    std::snprintf(buffer, sizeof(buffer),
+                  "score=%d  high=%d  lives=%d  ammo=%d  level=%d+%d  fps~%d",
+                  game.score, game.highScore, game.lives, game.ammoCount(),
+                  levelDisplay, superLevel, fpsEstimate);
+  } else {
+    std::snprintf(buffer, sizeof(buffer),
+                  "score=%d  high=%d  lives=%d  ammo=%d  level=%d  fps~%d",
+                  game.score, game.highScore, game.lives, game.ammoCount(),
+                  levelDisplay, fpsEstimate);
   }
-  mvaddch(2, kCanvasWidth + 1, '+');
+  putStringStyled(0, static_cast<std::int32_t>(title.size()) + 2, buffer, kPairHud, false);
+  putStringStyled(1, 0, "A/D or arrows move  Space shoot  P pause  Q quit", kPairHud, false);
+
+  putCharStyled(2, 0, '+', kPairFrame, true);
+  for (std::int32_t x = 0; x < kCanvasWidth; ++x) {
+    putCharStyled(2, x + 1, '-', kPairFrame, true);
+  }
+  putCharStyled(2, kCanvasWidth + 1, '+', kPairFrame, true);
 
   for (std::int32_t y = 0; y < kCanvasHeight; ++y) {
-    mvaddch(y + 3, 0, '|');
+    putCharStyled(y + 3, 0, '|', kPairFrame, true);
     for (std::int32_t x = 0; x < kCanvasWidth; ++x) {
-      mvaddch(y + 3, x + 1, canvas[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)]);
+      const Cell& cell = canvas[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+      putCharStyled(y + 3, x + 1, cell.glyph, cell.pair, cell.bold);
     }
-    mvaddch(y + 3, kCanvasWidth + 1, '|');
+    putCharStyled(y + 3, kCanvasWidth + 1, '|', kPairFrame, true);
   }
 
   const std::int32_t bottom = kCanvasHeight + 3;
-  mvaddch(bottom, 0, '+');
+  putCharStyled(bottom, 0, '+', kPairFrame, true);
   for (std::int32_t x = 0; x < kCanvasWidth; ++x) {
-    mvaddch(bottom, x + 1, '-');
+    putCharStyled(bottom, x + 1, '-', kPairFrame, true);
   }
-  mvaddch(bottom, kCanvasWidth + 1, '+');
+  putCharStyled(bottom, kCanvasWidth + 1, '+', kPairFrame, true);
+
+  if (!statusLine.empty()) {
+    putStringStyled(bottom + 1, 0, statusLine, kPairHud, true);
+  }
 
   refresh();
 }
@@ -165,29 +278,43 @@ void movePaddle(Game& game, std::int32_t delta) {
   }
 }
 
-void handleInput(Game& game, int key) {
+bool handleInput(Game& game, int key) {
   switch (key) {
     case 'a':
     case 'A':
     case 'h':
     case KEY_LEFT:
       movePaddle(game, -2);
-      break;
+      return false;
     case 'd':
     case 'D':
     case 'l':
     case KEY_RIGHT:
       movePaddle(game, 2);
-      break;
-    case ' ':
-      game.boardRef().shoot();
-      break;
+      return false;
+    case ' ': {
+      KeyEvent event{};
+      event.keycode = Game::KEY_SPACE;
+      game.keyDown(event);
+      return false;
+    }
     case 'p':
-    case 'P':
-      game.pause();
-      break;
+    case 'P': {
+      KeyEvent event{};
+      event.keycode = Game::KEY_P;
+      game.keyDown(event);
+      return false;
+    }
+    case 'r':
+    case 'R':
+      game.newGame(1);
+      return false;
+    case 'q':
+    case 'Q':
+    case 27:  // Escape
+      return true;
     default:
-      break;
+      return false;
   }
 }
 
@@ -195,21 +322,16 @@ bool consumeInput(Game& game) {
   bool quit = false;
   int key = getch();
   while (key != ERR) {
-    if (key == 'q' || key == 'Q') {
+    if (handleInput(game, key)) {
       quit = true;
       break;
     }
-    handleInput(game, key);
     key = getch();
   }
   return quit;
 }
 
-bool loadLevelsFile(const char* path) {
-  if (path == nullptr || path[0] == '\0') {
-    return false;
-  }
-
+bool tryLoadLevels(const std::string& path) {
   std::ifstream input(path, std::ios::binary);
   if (!input.good()) {
     return false;
@@ -226,6 +348,21 @@ bool loadLevelsFile(const char* path) {
   return true;
 }
 
+bool autoLoadLevels() {
+  static const char* const candidates[] = {
+      "levels.bin",
+      "assets/levels.bin",
+      "../assets/levels.bin",
+      "../../assets/levels.bin",
+  };
+  for (const char* candidate : candidates) {
+    if (tryLoadLevels(candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -239,8 +376,12 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (levelsPath != nullptr && !loadLevelsFile(levelsPath)) {
-    std::cerr << "Warning: failed to load levels file: " << levelsPath << "\n";
+  if (levelsPath != nullptr) {
+    if (!tryLoadLevels(levelsPath)) {
+      std::cerr << "Warning: failed to load levels file: " << levelsPath << "\n";
+    }
+  } else {
+    autoLoadLevels();
   }
 
   initscr();
@@ -249,6 +390,7 @@ int main(int argc, char** argv) {
   keypad(stdscr, TRUE);
   nodelay(stdscr, TRUE);
   curs_set(0);
+  setupColors();
 
   Game game;
   game.setSchedulingEnabled(false);
@@ -259,25 +401,44 @@ int main(int argc, char** argv) {
   bool quit = false;
   std::int32_t fpsEstimate = 30;
   auto lastFrame = std::chrono::steady_clock::now();
+  std::int32_t currentLevel = 1;
 
   while (!quit && game.gameState() != Game::STATE_NONE) {
     const auto frameStart = std::chrono::steady_clock::now();
     quit = consumeInput(game);
 
-    if (!quit && !game.paused) {
-      game.boardRef().update(kFrameMs);
-      game.advanceState();
-    }
-
     const auto now = std::chrono::steady_clock::now();
-    const auto frameDeltaMs =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrame).count();
-    if (frameDeltaMs > 0) {
-      fpsEstimate = static_cast<std::int32_t>(1000 / frameDeltaMs);
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrame).count();
+    const std::int32_t boundedElapsed = static_cast<std::int32_t>(std::clamp<std::int64_t>(elapsedMs, 0, 33));
+    if (elapsedMs > 0) {
+      fpsEstimate = static_cast<std::int32_t>(1000 / std::max<std::int64_t>(1, elapsedMs));
     }
     lastFrame = now;
 
-    renderFrame(game, fpsEstimate);
+    if (!quit && !game.paused) {
+      game.boardRef().update(boundedElapsed);
+      const std::int32_t prevState = game.gameState();
+      game.advanceState();
+      if (prevState == Game::STATE_FINISHEDLEVEL) {
+        ++currentLevel;
+        if (currentLevel > Bricks::getNumLevels()) {
+          currentLevel = 1;
+        }
+      }
+    }
+
+    std::string overlay;
+    if (game.paused) {
+      overlay = "[PAUSED]  press P or Space to resume";
+    } else if (game.gameState() == Game::STATE_GAMEOVER) {
+      overlay = "GAME OVER  press R to restart, Q to quit";
+    } else if (game.gameState() == Game::STATE_DEATH) {
+      overlay = "BALL LOST  preparing next ball...";
+    } else if (game.gameState() == Game::STATE_FINISHEDLEVEL) {
+      overlay = "LEVEL CLEAR";
+    }
+
+    renderFrame(game, fpsEstimate, currentLevel, game.superLevelCount(), overlay);
 
     const auto workMs =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - frameStart)

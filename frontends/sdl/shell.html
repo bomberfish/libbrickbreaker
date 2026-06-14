@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>BrickBreaker</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='6' fill='%2320c997'/%3E%3Crect y='8' width='6' height='8' fill='%23f1c40f'/%3E%3Crect x='10' y='8' width='6' height='8' fill='%23e74c3c'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: dark;
+      --fg: #f4f5fb;
+      --muted: #aab1c8;
+      --accent: #20c997;
+      --bg: #06080f;
+      --panel: #11141d;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    h1 {
+      font-size: 18px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin: 0;
+      color: var(--accent);
+    }
+
+    .subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0 0 4px;
+    }
+
+    .stage {
+      width: min(640px, 96vw);
+      aspect-ratio: 540 / 720;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      outline: none;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 6px 18px;
+      max-width: 640px;
+      width: 96vw;
+      font-size: 13px;
+      color: var(--muted);
+      background: var(--panel);
+      padding: 10px 14px;
+      border-radius: 10px;
+    }
+
+    .legend kbd {
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--fg);
+    }
+
+    .footer {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    #status {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--bg);
+      color: var(--muted);
+      font-size: 13px;
+      pointer-events: none;
+      transition: opacity 240ms ease;
+    }
+
+    #status.hidden { opacity: 0; }
+
+    #progress {
+      width: 60%;
+      max-width: 280px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    #progress > span {
+      display: block;
+      width: 0%;
+      height: 100%;
+      background: var(--accent);
+      transition: width 200ms ease;
+    }
+  </style>
+</head>
+<body>
+  <h1>BrickBreaker</h1>
+  <p class="subtitle">libbrickbreaker · SDL2 · WebAssembly</p>
+
+  <div class="stage">
+    <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+    <div id="status">
+      <div>Loading game…</div>
+      <div id="progress"><span></span></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div><kbd>←</kbd>/<kbd>→</kbd> or <kbd>A</kbd>/<kbd>D</kbd> — move paddle</div>
+    <div><kbd>Space</kbd> — launch ball / shoot</div>
+    <div><kbd>P</kbd> — pause</div>
+    <div><kbd>R</kbd> — restart</div>
+    <div>Mouse drag — touch input</div>
+    <div>Click canvas first to capture keys</div>
+  </div>
+
+  <div class="footer">click the canvas before pressing keys · sound starts after first input</div>
+
+  <script>
+    var statusEl = document.getElementById('status');
+    var progressEl = document.querySelector('#progress > span');
+    var canvas = document.getElementById('canvas');
+
+    function setProgress(pct) {
+      progressEl.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    }
+
+    function hideStatus() {
+      statusEl.classList.add('hidden');
+      setTimeout(function () { statusEl.style.display = 'none'; }, 260);
+    }
+
+    canvas.addEventListener('click', function () { canvas.focus(); });
+
+    var Module = {
+      preRun: [],
+      postRun: [function () {
+        canvas.focus();
+        hideStatus();
+      }],
+      print: function (text) { console.log(text); },
+      printErr: function (text) { console.warn(text); },
+      canvas: canvas,
+      setStatus: function (text) {
+        if (!text || /^Running/.test(text)) {
+          hideStatus();
+          return;
+        }
+        var match = text.match(/Downloading data\.\.\.\s+\((\d+)\/(\d+)\)/);
+        if (match) {
+          var pct = (parseInt(match[1], 10) / parseInt(match[2], 10)) * 100;
+          setProgress(pct);
+          statusEl.firstChild.textContent = 'Loading assets… ' + Math.round(pct) + '%';
+          return;
+        }
+        statusEl.firstChild.textContent = text;
+      },
+      totalDependencies: 0,
+      monitorRunDependencies: function (left) {
+        this.totalDependencies = Math.max(this.totalDependencies, left);
+        if (left === 0) {
+          setProgress(100);
+        } else {
+          setProgress(100 * (1 - left / this.totalDependencies));
+        }
+      },
+    };
+    Module.setStatus('Downloading…');
+    window.onerror = function () {
+      statusEl.firstChild.textContent = 'Error loading game (see console)';
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

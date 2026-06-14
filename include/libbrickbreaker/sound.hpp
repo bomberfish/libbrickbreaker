@@ -7,10 +7,13 @@ namespace libbrickbreaker {
 
 class Sound {
  public:
+  using PlayCallback = void (*)(std::int32_t id, std::int32_t volume);
+
   Sound() = default;
   Sound(std::int32_t id, std::string source);
 
   static std::int32_t numStartedCount();
+  static void setPlayCallback(PlayCallback callback);
 
   void setVolume(std::int32_t level);
   void start(std::int32_t maxStarted, std::int32_t volume);
@@ -21,6 +24,7 @@ class Sound {
 
  private:
   static std::int32_t numStarted_;
+  static PlayCallback playCallback_;
 
   std::int32_t id_{0};
   std::string source_{};

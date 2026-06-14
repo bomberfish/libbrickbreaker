@@ -5,11 +5,16 @@
 namespace libbrickbreaker {
 
 std::int32_t Sound::numStarted_ = 0;
+Sound::PlayCallback Sound::playCallback_ = nullptr;
 
 Sound::Sound(std::int32_t id, std::string source) : id_(id), source_(std::move(source)) {}
 
 std::int32_t Sound::numStartedCount() {
   return numStarted_;
+}
+
+void Sound::setPlayCallback(PlayCallback callback) {
+  playCallback_ = callback;
 }
 
 void Sound::setVolume(std::int32_t level) {
@@ -31,6 +36,16 @@ void Sound::start(std::int32_t maxStarted, std::int32_t volume) {
   ++numStarted_;
   ++started_;
   playing_ = true;
+
+  if (playCallback_ != nullptr) {
+    playCallback_(id_, volume_);
+  }
+
+  playing_ = false;
+  started_ = 0;
+  if (numStarted_ > 0) {
+    --numStarted_;
+  }
 }
 
 void Sound::gamePaused(bool paused) {
